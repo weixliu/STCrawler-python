@@ -4,13 +4,36 @@ import time
 import re
 import os
 import sys
-
+#safely urlopen url
+def ULRErrorSafeURLOpen( url, maxTries = 10 ):
+    for tries in range( maxTries ):
+        try:
+            response = urllib2.urlopen( url )
+            return response
+        except urllib2.URLError as e:
+            if tries < maxTries:
+                continue
+            else:
+                print ( 'error in get %s' % url )
+                exit(0)
+#urlretrieve callback show download processing
 def callbackfunc(blocknum, blocksize, totalsize):
     percent = 100.0 * blocknum * blocksize / totalsize
     if percent > 100:
         percent = 100
     print "%.2f%%" % percent
 
+def SafeDownloadTries( url, filePath, callback, maxTries = 10 ):
+    for tries in range( maxTries ):
+        try:
+            urllib.urlretrieve( url, local, callbackfunc )
+            return response
+        except Exception as e:
+            if tries < maxTries:
+                continue
+            else:
+                print ( 'error in get %s' % url )
+#songType
 SongTypeDict = {
     "7d99bb4c7bd4602c342e2bb826ee8777":".wma",
     "25e4f07f5123910814d9b8f3958385ba":".Wma",
@@ -19,13 +42,13 @@ SongTypeDict = {
     "d82029f73bcaf052be8930f6f4247184":".MP3",
     "5fd91d90d9618feca4740ac1f2e7948f":".Mp3"
 }
-
+#in case index out of range,return default value
 def getListIndex(l, index, default):
     if len(l) > index:
         return l[index]
     else:
         return default
-
+#get realsongurl
 def extractRealSongURL(playIcon,strID,strURL,intWidth,intHeight,stype,sHead,st_songid,t):
     if strURL.find('rayfile') > 0:
         realURL = sHead + strURL + SongTypeDict[stype]
@@ -38,13 +61,13 @@ def extractRealSongURL(playIcon,strID,strURL,intWidth,intHeight,stype,sHead,st_s
         }
         data = urllib.urlencode(values)
         req = urllib2.Request(url, data)
+        #fix
         response = urllib2.urlopen(req)
         realURL = response.read()
     return realURL
-
-
+#get realsongurl
 def extractSongURL( url ):
-    responseL = urllib2.urlopen(url)
+    responseL = ULRErrorSafeURLOpen(url, 10)
     if responseL.geturl() != url:
         print url
         return "error about this song"
@@ -73,67 +96,79 @@ def extractSongURL( url ):
         print "some error happen with extractSongInfo in HTMLSource"
         print params
 
+def GetUserRecSongNum( HTMLSource ):
+    songNumStr1 = r'<p class="more"><a href="/user/.*?/allrec" class="underline">(.*?)</a></p>'
+    songNumStr2 = r'\d\d*'
+    SongNumStrList = re.findall( re.compile(songNumStr1, re.S), HTMLSource )
+    songNum = 0
+    if len(SongNumStrList) != 0:
+        NumList = re.findall( re.compile(songNumStr2, re.S), SongNumStrList[0] )
+        if len(NumList) != 0:
+            songNum = int( NumList[0] )
+            print "the %d user rec %d songs" % (uid, songNum)
+            return songNum
+    else:
+    	return -1
+    print "can't get songs number info"
+    return songNum
+
+def GetUserRecSongPageList( userURL ):
+    userRecSongListURL = userURL + 'allrec/'
+    print "get user allrec song url:%s" % userRecSongListURL
+    pageStr = r"<a href='/user/.*?/allrec/(\d*)'>"
+    innerRes = ULRErrorSafeURLOpen( userRecSongListURL, 10 )
+    innerSrc = innerRes.read()
+    pageList = re.findall( re.compile(pageStr, re.S), innerSrc )
+    PageNum = 1 if len(pageList) == 0 else int( pageList[len(pageList) - 1] )
+    print "the user has %d pages" % PageNum
+    PageURLList = []
+    for page in range(PageNum):
+        realURL = userRecSongListURL + '/%d' % (page + 1)
+        print "get page %d" % (page + 1)
+        PageURLList.append(realURL)
+    return PageURLList
+
+def GetSongInfoInPage( pageURL ):
+    response3 = ULRErrorSafeURLOpen( pageURL, 10 )
+    source3 = response3.read()
+    pattern = re.compile(r'WL\("(.*?)", "(.*?)","(.*?)","(.*?)"\);',re.S)
+    result3 = re.findall( pattern, source3 )
+    return result3
+
 inputUserID = int(sys.argv[1])
 #main process , change range number is UserID,[start,end)
 for uid in range(inputUserID,inputUserID + 1):
     path = "./%d" % uid
     if not os.path.exists(path):
         os.mkdir(path)
-    for tries in range(10):
-        try:
-            userURL = 'http://www.songtaste.com/user/%d/' % uid
-            response = urllib2.urlopen( userURL )
-            #sleep for 10ms
-            if response.geturl() == userURL:
-                print "%s is valid" % userURL
-                #extend the url to http://www.songtaste.com/user/%d/allrec/
-                songNumStr1 = r'<p class="more"><a href="/user/.*?/allrec" class="underline">(.*?)</a></p>'
-                songNumStr2 = r'\d\d*'
-                HTMLSource = response.read()
-                SongNumStrList = re.findall( re.compile(songNumStr1, re.S), HTMLSource )
-                if len(SongNumStrList) != 0:
-                    NumList = re.findall( re.compile(songNumStr2, re.S), SongNumStrList[0] )
-                    if len(NumList) != 0:
-                        songNum = int( NumList[0] )
-                        print "the %d user rec %d songs" % (uid, songNum)
-                    userRecSongListURL = userURL + 'allrec/'
-                    print "get user allrec song url:%s" % userRecSongListURL
-                    pageStr = r"<a href='/user/.*?/allrec/(\d*)'>"
-                    innerRes = urllib2.urlopen( userRecSongListURL )
-                    innerSrc = innerRes.read()
-                    pageList = re.findall( re.compile(pageStr, re.S), innerSrc )
-                    PageNum = 1 if len(pageList) == 0 else int( pageList[len(pageList) - 1] )
-                    print "the user has %d pages" % PageNum
-                    for page in range(PageNum):
-                        #url = userRecSongListURL + '/%d' % (page + 1)
-                        realURL = userRecSongListURL + '/%d' % (page + 1)
-                        print "get page %d" % (page + 1)
-                        response3 = urllib2.urlopen( realURL )
-                        source3 = response3.read()
-                        pattern = re.compile(r'WL\("(.*?)", "(.*?)","(.*?)","(.*?)"\);',re.S)
-                        result3 = re.findall( pattern, source3 )
-                        for ritem in result3:
-                            Idx = ritem[0]
-                            SongID = ritem[1]
-                            SongName = ritem[2]
-                            UpDT = ritem[3]
-                            songURL = 'http://www.songtaste.com/song/%s/' % SongID
-                            songRealURL = extractSongURL( songURL )
-                            print songRealURL
-                            if songRealURL != "error about this song":
-                                tail = songRealURL[ songRealURL.rfind('.'): ]
-                                local = '.\%d\%s%s' % (uid, re.sub(r'(<|>|:|"|/|\\|\||\?|\*)', ' ', SongName), tail)
-                                urllib.urlretrieve( songRealURL, local, callbackfunc )
-                else:
-                    print 'null'
 
-            else:
-                print "%s is invalid" % userURL
-            break
-        except urllib2.URLError as e:
-            if tries < 10:
-                print e.message
-                continue
-            else:
-                print 'error in connecting songtaste'
-                exit(0)
+    userURL = 'http://www.songtaste.com/user/%d/' % uid
+    response =  ULRErrorSafeURLOpen( userURL, 10 )
+    if response.geturl() == userURL:
+        print "%s is valid" % userURL
+        #extend the url to http://www.songtaste.com/user/%d/allrec/
+        HTMLSource = response.read()
+        #songNum
+        songNum = GetUserRecSongNum( HTMLSource )
+        if songNum >= 0:
+            #getPageList
+            PageList = GetUserRecSongPageList( userURL )
+            #iterate page in user
+            for pageurl in PageList:
+                result3 = GetSongInfoInPage( pageurl )
+                for ritem in result3:
+                    Idx = ritem[0]
+                    SongID = ritem[1]
+                    SongName = ritem[2]
+                    UpDT = ritem[3]
+                    songURL = 'http://www.songtaste.com/song/%s/' % SongID
+                    songRealURL = extractSongURL( songURL )
+                    print songRealURL
+                    if songRealURL != "error about this song":
+                        tail = songRealURL[ songRealURL.rfind('.'): ]
+                        local = '.\%d\%s%s' % (uid, re.sub(r'(<|>|:|"|/|\\|\||\?|\*)', ' ', SongName), tail)
+                        SafeDownloadTries( songRealURL, local, callbackfunc )
+        else:
+            print "no rec songs"
+    else:
+        print "%s is invalid" % userURL
